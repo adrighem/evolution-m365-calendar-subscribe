@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 #include <glib.h>
 #include <libebook/libebook.h>
 
@@ -109,4 +111,3 @@ main (int argc, char *argv[])
 
     return g_test_run ();
 }
-

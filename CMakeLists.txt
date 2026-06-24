@@ -1,5 +1,14 @@
+# SPDX-License-Identifier: GPL-3.0-only
+
 cmake_minimum_required(VERSION 3.15)
-project(evolution-m365-calendar-subscribe VERSION 0.1.0 LANGUAGES C)
+
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" PROJECT_VERSION_FROM_FILE LIMIT_COUNT 1)
+string(STRIP "${PROJECT_VERSION_FROM_FILE}" PROJECT_VERSION_FROM_FILE)
+
+project(evolution-m365-calendar-subscribe
+    VERSION "${PROJECT_VERSION_FROM_FILE}"
+    DESCRIPTION "GNOME Evolution plugin for Microsoft 365 and Exchange calendar subscriptions"
+    LANGUAGES C)
 
 include(GNUInstallDirs)
 
@@ -27,4 +36,3 @@ enable_testing()
 
 add_subdirectory(src)
 add_subdirectory(tests)
-

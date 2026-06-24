@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: Feature request
+description: Suggest an improvement to the Evolution calendar subscription workflow
+title: "Feature: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What workflow is slow, confusing, or missing?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: What should the plugin do differently?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Optional, but useful if Evolution already exposes a related workflow.
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: "Evolution 3.56, Microsoft 365, Debian 13"

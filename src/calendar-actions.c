@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 #include "calendar-actions.h"
 #include "calendar-manager.h"
 #include "calendar-ui.h"
@@ -57,4 +59,3 @@ action_calendar_quick_subscribe_cb (EUIAction *action, GVariant *parameter, gpoi
 
     gtk_widget_destroy (dialog);
 }
-

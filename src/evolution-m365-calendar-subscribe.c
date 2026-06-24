@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 #include "calendar-actions.h"
 
 #include <e-util/e-util.h>
@@ -54,4 +56,3 @@ e_plugin_lib_enable (EPlugin *ep, gint enable)
 {
     return 0;
 }
-

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 #ifndef CALENDAR_MANAGER_H
 #define CALENDAR_MANAGER_H
 
@@ -31,4 +33,3 @@ gboolean m365_calendar_subscribe (ESource *ews_source,
 G_END_DECLS
 
 #endif /* CALENDAR_MANAGER_H */
-

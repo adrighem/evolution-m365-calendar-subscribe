@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-only
+
 add_library(m365-calendar-subscribe-common OBJECT
     calendar-actions.c
     calendar-manager.c
@@ -33,4 +35,3 @@ install(TARGETS org-gnome-evolution-m365-calendar-subscribe
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/org-gnome-evolution-m365-calendar-subscribe.eplug
         DESTINATION ${EVOLUTION_PLUGIN_DIR}
 )
-

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 #include "calendar-ui.h"
 #include "calendar-manager.h"
 #include "string-utils.h"
@@ -141,4 +143,3 @@ calendar_create_quick_subscribe_dialog (GtkWindow *parent)
 
     return dialog;
 }
-

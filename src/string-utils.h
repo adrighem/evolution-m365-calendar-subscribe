@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 #ifndef STRING_UTILS_H
 #define STRING_UTILS_H
 
@@ -10,4 +12,3 @@ gboolean calendar_fuzzy_match (const gchar *pattern, const gchar *str);
 G_END_DECLS
 
 #endif /* STRING_UTILS_H */
-

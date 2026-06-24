@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 #ifndef CALENDAR_ACTIONS_H
 #define CALENDAR_ACTIONS_H
 
@@ -10,4 +12,3 @@ void action_calendar_quick_subscribe_cb (EUIAction *action, GVariant *parameter,
 G_END_DECLS
 
 #endif /* CALENDAR_ACTIONS_H */
-

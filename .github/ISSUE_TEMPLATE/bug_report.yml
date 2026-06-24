@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: Bug report
+description: Report a problem with calendar subscription behavior
+title: "Bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Do not include passwords, access tokens, tenant secrets, or private calendar contents.
+  - type: input
+    id: distro
+    attributes:
+      label: Linux distribution
+      placeholder: "Debian 13, Ubuntu 24.04, Fedora 42"
+    validations:
+      required: true
+  - type: input
+    id: evolution_version
+    attributes:
+      label: Evolution and evolution-ews versions
+      placeholder: "Evolution 3.56.2, evolution-ews 3.56.1"
+    validations:
+      required: true
+  - type: dropdown
+    id: account_type
+    attributes:
+      label: Account type
+      options:
+        - Microsoft 365
+        - Exchange Online
+        - Exchange EWS
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open Evolution calendar view.
+        2. Click Quick Subscribe...
+        3. Search for...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or warnings
+      description: Redact email addresses, calendar names, tenant IDs, and private data.
+      render: text

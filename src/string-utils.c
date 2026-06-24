@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 #include "string-utils.h"
 
 gboolean
@@ -28,4 +30,3 @@ calendar_fuzzy_match (const gchar *pattern, const gchar *str)
 
     return matched;
 }
-

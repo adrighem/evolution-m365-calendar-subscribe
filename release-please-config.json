@@ -1,0 +1,40 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "version-file": "VERSION",
+      "initial-version": "0.1.0",
+      "include-component-in-tag": false,
+      "include-v-in-tag": true,
+      "include-v-in-release-name": true,
+      "changelog-sections": [
+        {
+          "type": "feat",
+          "section": "Features"
+        },
+        {
+          "type": "fix",
+          "section": "Bug Fixes"
+        },
+        {
+          "type": "docs",
+          "section": "Documentation"
+        },
+        {
+          "type": "ci",
+          "section": "Continuous Integration"
+        },
+        {
+          "type": "test",
+          "section": "Tests"
+        },
+        {
+          "type": "chore",
+          "section": "Maintenance",
+          "hidden": true
+        }
+      ]
+    }
+  }
+}
