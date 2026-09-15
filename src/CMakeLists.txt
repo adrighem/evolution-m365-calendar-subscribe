@@ -7,7 +7,13 @@ add_library(m365-calendar-subscribe-common OBJECT
     string-utils.c
 )
 
-target_compile_options(m365-calendar-subscribe-common PRIVATE "-fno-sanitize=all")
+target_compile_definitions(m365-calendar-subscribe-common PRIVATE
+    EVOLUTION_EWS_LIBDIR="${EVOLUTION_EWS_LIBDIR}"
+    EVOLUTION_PRIVLIBDIR="${EVO_PRIVLIBDIR}"
+    EVOLUTION_MODULEDIR="${EVOLUTION_MODULEDIR}"
+    $<$<BOOL:${FREEBUSY_ONLY}>:FREEBUSY_ONLY_DEFAULT=1>
+)
+set_property(TARGET m365-calendar-subscribe-common PROPERTY POSITION_INDEPENDENT_CODE ON)
 target_include_directories(m365-calendar-subscribe-common PRIVATE ${EVOLUTION_INCLUDE_DIRS})
 
 add_library(org-gnome-evolution-m365-calendar-subscribe MODULE
@@ -15,8 +21,6 @@ add_library(org-gnome-evolution-m365-calendar-subscribe MODULE
     $<TARGET_OBJECTS:m365-calendar-subscribe-common>
 )
 
-target_compile_options(org-gnome-evolution-m365-calendar-subscribe PRIVATE "-fno-sanitize=all")
-target_link_options(org-gnome-evolution-m365-calendar-subscribe PRIVATE "-fno-sanitize=all")
 target_link_libraries(org-gnome-evolution-m365-calendar-subscribe PRIVATE PkgConfig::EVOLUTION)
 target_include_directories(org-gnome-evolution-m365-calendar-subscribe PRIVATE ${EVOLUTION_INCLUDE_DIRS})
 

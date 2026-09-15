@@ -8,10 +8,7 @@
 static void
 test_calendar_quick_subscribe_dialog_structure (void)
 {
-    g_test_expect_message (G_LOG_DOMAIN, G_LOG_LEVEL_WARNING, "*No EWS or Microsoft 365 address books available*");
     GtkWidget *dialog = calendar_create_quick_subscribe_dialog (NULL);
-    g_test_assert_expected_messages ();
-
     g_assert_true (GTK_IS_DIALOG (dialog));
 
     GtkWidget *search_entry = g_object_get_data (G_OBJECT (dialog), "search-entry");
@@ -28,9 +25,7 @@ test_calendar_quick_subscribe_dialog_structure (void)
 static void
 test_calendar_quick_subscribe_search_completion (void)
 {
-    g_test_expect_message (G_LOG_DOMAIN, G_LOG_LEVEL_WARNING, "*No EWS or Microsoft 365 address books available*");
     GtkWidget *dialog = calendar_create_quick_subscribe_dialog (NULL);
-    g_test_assert_expected_messages ();
 
     GtkWidget *search_entry = g_object_get_data (G_OBJECT (dialog), "search-entry");
     GtkEntryCompletion *completion = gtk_entry_get_completion (GTK_ENTRY (search_entry));
@@ -41,14 +36,26 @@ test_calendar_quick_subscribe_search_completion (void)
 }
 
 static void
+test_calendar_quick_subscribe_busy_state (void)
+{
+    GtkWidget *dialog = calendar_create_quick_subscribe_dialog (NULL);
+    GtkWidget *search_entry = g_object_get_data (G_OBJECT (dialog), "search-entry");
+
+    g_assert_true (gtk_widget_get_sensitive (search_entry));
+
+    calendar_dialog_set_busy (dialog, TRUE);
+    g_assert_false (gtk_widget_get_sensitive (search_entry));
+
+    calendar_dialog_set_busy (dialog, FALSE);
+    g_assert_true (gtk_widget_get_sensitive (search_entry));
+
+    gtk_widget_destroy (dialog);
+}
+
+static void
 test_calendar_quick_subscribe_buffered_input (void)
 {
-    g_test_expect_message (G_LOG_DOMAIN, G_LOG_LEVEL_WARNING, "*No EWS or Microsoft 365 address books available*");
     GtkWidget *dialog = calendar_create_quick_subscribe_dialog (NULL);
-    g_test_assert_expected_messages ();
-
-    gpointer flag = g_object_get_data (G_OBJECT (dialog), "contacts-loaded");
-    g_assert_cmpint (GPOINTER_TO_INT (flag), ==, 1);
 
     GtkWidget *search_entry = g_object_get_data (G_OBJECT (dialog), "search-entry");
     gtk_entry_set_text (GTK_ENTRY (search_entry), "test input");
@@ -69,6 +76,7 @@ main (int argc, char *argv[])
 
     g_test_add_func ("/ui/calendar/quick-subscribe-dialog", test_calendar_quick_subscribe_dialog_structure);
     g_test_add_func ("/ui/calendar/quick-subscribe-search-completion", test_calendar_quick_subscribe_search_completion);
+    g_test_add_func ("/ui/calendar/quick-subscribe-busy-state", test_calendar_quick_subscribe_busy_state);
     g_test_add_func ("/ui/calendar/quick-subscribe-buffered-input", test_calendar_quick_subscribe_buffered_input);
 
     return g_test_run ();

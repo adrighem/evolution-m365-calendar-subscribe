@@ -14,9 +14,8 @@ through account settings or server-side folder names.
 - Adds **Quick Subscribe...** to Evolution's calendar File menu and toolbar.
 - Searches Exchange, Exchange Online, and Microsoft 365 address books with fuzzy
   autocomplete.
-- Subscribes to another person's calendar when calendar permissions allow it.
-- Falls back to the target user's free/busy availability calendar when full
-  calendar access is unavailable.
+- Fast availability calendar subscriptions (Free/Busy mode by default).
+- Optional full calendar subscription with automated fallback to availability.
 - Works with Evolution EWS-backed accounts and Microsoft 365 address books.
 
 ## Requirements
@@ -37,6 +36,42 @@ cmake ..
 make
 ```
 
+### Build Options
+
+#### Free/Busy Only Mode (`FREEBUSY_ONLY`)
+
+By default, the plugin is built with `-DFREEBUSY_ONLY=ON`.
+
+* **Default (`-DFREEBUSY_ONLY=ON`)**: Directly creates a Free/Busy availability
+  calendar (`freebusy-calendar::<email>`). This bypasses Exchange folder queries
+  and permission checks, providing instant subscriptions without network lag.
+* **Full Calendar Mode (`-DFREEBUSY_ONLY=OFF`)**: Attempts to query and subscribe
+  to the user's primary "Calendar" folder first, falling back to Free/Busy
+  availability only if permission is denied.
+
+> **Performance Note**: Adding standard/full calendars can be very slow. It
+> requires multiple synchronous EWS network round-trips to Exchange/M365 to
+> switch mailboxes, query folder metadata, and inspect permission tables. In
+> addition, Exchange will reject standard calendar access unless the coworker
+> has explicitly configured delegate or read permissions for your account.
+> For most users, the default Free/Busy mode (`-DFREEBUSY_ONLY=ON`) is recommended.
+
+To disable Free/Busy-only mode and attempt full calendar subscriptions:
+
+```bash
+mkdir build
+cd build
+cmake -DFREEBUSY_ONLY=OFF ..
+make
+```
+
+To explicitly enable Free/Busy-only mode:
+
+```bash
+cmake -DFREEBUSY_ONLY=ON ..
+make
+```
+
 ## Install
 
 ```bash
@@ -52,7 +87,7 @@ view and choose **Quick Subscribe...** from the File menu or toolbar.
 2. Choose **Quick Subscribe...**.
 3. Type a coworker's name or email address.
 4. Select the matching contact from autocomplete.
-5. Subscribe to the shared calendar or availability calendar.
+5. Subscribe to the calendar.
 
 ## Troubleshooting
 

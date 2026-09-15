@@ -26,6 +26,16 @@ void m365_calendar_load_all_contacts (CalendarContactCallback callback,
 
 ESource * m365_calendar_get_ews_source (void);
 
+void m365_calendar_subscribe_async (ESource *ews_source,
+                                    const gchar *email,
+                                    GCancellable *cancellable,
+                                    GAsyncReadyCallback callback,
+                                    gpointer user_data);
+
+gboolean m365_calendar_subscribe_finish (ESource *ews_source,
+                                         GAsyncResult *result,
+                                         GError **error);
+
 gboolean m365_calendar_subscribe (ESource *ews_source,
                                   const gchar *email,
                                   GError **error);

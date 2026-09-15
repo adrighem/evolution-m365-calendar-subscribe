@@ -13,6 +13,18 @@
 #include <shell/e-shell.h>
 #include <string.h>
 
+#ifndef EVOLUTION_EWS_LIBDIR
+#define EVOLUTION_EWS_LIBDIR "/usr/lib/evolution-ews"
+#endif
+
+#ifndef EVOLUTION_PRIVLIBDIR
+#define EVOLUTION_PRIVLIBDIR "/usr/lib/evolution"
+#endif
+
+#ifndef EVOLUTION_MODULEDIR
+#define EVOLUTION_MODULEDIR "/usr/lib/evolution/modules"
+#endif
+
 typedef struct {
     gchar *search_text;
     CalendarContactCallback callback;
@@ -20,6 +32,10 @@ typedef struct {
     GSList *contacts;
     gint pending_books;
 } CalendarSearchContext;
+
+typedef struct {
+    gchar *email;
+} SubscribeTaskData;
 
 static void
 calendar_contact_free (CalendarContact *contact)
@@ -35,9 +51,42 @@ calendar_contact_free (CalendarContact *contact)
 static void
 calendar_search_context_free (CalendarSearchContext *ctx)
 {
+    if (!ctx)
+        return;
+
     g_free (ctx->search_text);
     g_slist_free_full (ctx->contacts, (GDestroyNotify) calendar_contact_free);
     g_free (ctx);
+}
+
+static void
+subscribe_task_data_free (SubscribeTaskData *data)
+{
+    if (!data)
+        return;
+
+    g_free (data->email);
+    g_free (data);
+}
+
+static GModule *
+load_module_with_fallback (const gchar *primary_dir, const gchar *secondary_dir, const gchar *filename)
+{
+    GModule *module = NULL;
+
+    if (primary_dir && *primary_dir) {
+        g_autofree gchar *path = g_build_filename (primary_dir, filename, NULL);
+        module = g_module_open (path, G_MODULE_BIND_LAZY);
+    }
+    if (!module && secondary_dir && *secondary_dir) {
+        g_autofree gchar *path = g_build_filename (secondary_dir, filename, NULL);
+        module = g_module_open (path, G_MODULE_BIND_LAZY);
+    }
+    if (!module) {
+        module = g_module_open (filename, G_MODULE_BIND_LAZY);
+    }
+
+    return module;
 }
 
 static gboolean
@@ -58,9 +107,9 @@ static void
 calendar_search_got_contacts_cb (GObject *source_object, GAsyncResult *res, gpointer user_data)
 {
     EBookClient *book_client = E_BOOK_CLIENT (source_object);
-    CalendarSearchContext *ctx = user_data;
+    CalendarSearchContext *ctx = (CalendarSearchContext *) user_data;
     GSList *contacts = NULL;
-    GError *error = NULL;
+    g_autoptr(GError) error = NULL;
 
     if (e_book_client_get_contacts_finish (book_client, res, &contacts, &error)) {
         for (GSList *l = contacts; l; l = l->next) {
@@ -80,7 +129,6 @@ calendar_search_got_contacts_cb (GObject *source_object, GAsyncResult *res, gpoi
         g_slist_free_full (contacts, g_object_unref);
     } else {
         g_warning ("M365 Calendar Subscribe: Failed to get contacts: %s", error ? error->message : "Unknown error");
-        g_clear_error (&error);
     }
 
     ctx->pending_books--;
@@ -94,22 +142,20 @@ calendar_search_got_contacts_cb (GObject *source_object, GAsyncResult *res, gpoi
 static void
 calendar_search_connected_cb (GObject *source_object, GAsyncResult *res, gpointer user_data)
 {
-    CalendarSearchContext *ctx = user_data;
-    GError *error = NULL;
+    CalendarSearchContext *ctx = (CalendarSearchContext *) user_data;
+    g_autoptr(GError) error = NULL;
     EBookClient *book_client = (EBookClient *) e_book_client_connect_finish (res, &error);
 
     if (book_client) {
         EBookQuery *query = e_book_query_any_field_contains (ctx->search_text);
-        gchar *sexp = e_book_query_to_string (query);
+        g_autofree gchar *sexp = e_book_query_to_string (query);
 
         e_book_client_get_contacts (book_client, sexp, NULL, calendar_search_got_contacts_cb, ctx);
 
-        g_free (sexp);
         e_book_query_unref (query);
         g_object_unref (book_client);
     } else {
         g_warning ("M365 Calendar Subscribe: Failed to connect to book: %s", error ? error->message : "Unknown error");
-        g_clear_error (&error);
 
         ctx->pending_books--;
         if (ctx->pending_books <= 0) {
@@ -122,8 +168,8 @@ calendar_search_connected_cb (GObject *source_object, GAsyncResult *res, gpointe
 static void
 calendar_load_all_connected_cb (GObject *source_object, GAsyncResult *res, gpointer user_data)
 {
-    CalendarSearchContext *ctx = user_data;
-    GError *error = NULL;
+    CalendarSearchContext *ctx = (CalendarSearchContext *) user_data;
+    g_autoptr(GError) error = NULL;
     EBookClient *book_client = (EBookClient *) e_book_client_connect_finish (res, &error);
 
     if (book_client) {
@@ -131,7 +177,6 @@ calendar_load_all_connected_cb (GObject *source_object, GAsyncResult *res, gpoin
         g_object_unref (book_client);
     } else {
         g_warning ("M365 Calendar Subscribe: Failed to connect to book for bulk load: %s", error ? error->message : "Unknown error");
-        g_clear_error (&error);
 
         ctx->pending_books--;
         if (ctx->pending_books <= 0) {
@@ -237,7 +282,7 @@ ews_permissions_allow_read (GSList *perms, const gchar *our_email)
     EEwsPermission *regular_perm = NULL;
 
     for (GSList *l = perms; l; l = l->next) {
-        EEwsPermission *perm = l->data;
+        EEwsPermission *perm = (EEwsPermission *) l->data;
 
         if (perm->user_type == E_EWS_PERMISSION_USER_TYPE_DEFAULT) {
             default_perm = perm;
@@ -324,7 +369,6 @@ typedef void (*EwsFolderSetFolderTypeFunc) (gpointer folder, gint type);
 typedef void (*EwsFolderSetForeignMailFunc) (gpointer folder, const gchar *email);
 typedef void (*EwsFolderSetForeignFunc) (gpointer folder, gboolean is_foreign);
 
-/* Evolution EWS exports this symbol with "subscrive" in its name. */
 typedef gboolean (*EwsSubscribeSyncFunc) (gpointer ews_store,
                                           gpointer folder,
                                           const gchar *user_displayname,
@@ -334,13 +378,16 @@ typedef gboolean (*EwsSubscribeSyncFunc) (gpointer ews_store,
                                           GCancellable *cancellable,
                                           GError **error);
 
-gboolean
-m365_calendar_subscribe (ESource *ews_source, const gchar *email, GError **error)
+static gboolean
+m365_calendar_subscribe_internal (ESource *ews_source,
+                                  const gchar *email,
+                                  GCancellable *cancellable,
+                                  GError **error)
 {
     EShell *shell = e_shell_get_default ();
     EShellBackend *mail_backend;
     EMailSession *session;
-    CamelService *service;
+    CamelService *service = NULL;
     GModule *ews_module = NULL;
     GModule *ews_lib = NULL;
     GModule *ews_priv = NULL;
@@ -368,27 +415,38 @@ m365_calendar_subscribe (ESource *ews_source, const gchar *email, GError **error
     g_return_val_if_fail (E_IS_SOURCE (ews_source), FALSE);
     g_return_val_if_fail (email != NULL, FALSE);
 
-    if (!E_IS_SHELL (shell))
+    if (g_cancellable_set_error_if_cancelled (cancellable, error))
         return FALSE;
+
+    if (!E_IS_SHELL (shell)) {
+        g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_FAILED, "No active Evolution shell instance");
+        return FALSE;
+    }
 
     mail_backend = e_shell_get_backend_by_name (shell, "mail");
-    if (!mail_backend)
+    if (!mail_backend) {
+        g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND, "Evolution mail backend not found");
         return FALSE;
+    }
 
     session = e_mail_backend_get_session (E_MAIL_BACKEND (mail_backend));
-    if (!session)
+    if (!session) {
+        g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND, "Evolution mail session not found");
         return FALSE;
+    }
 
     service = camel_session_ref_service ((CamelSession *) session, e_source_get_uid (ews_source));
-    if (!service)
+    if (!service) {
+        g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND, "Camel service for EWS source not found");
         return FALSE;
+    }
 
-    ews_lib = g_module_open ("/usr/lib/evolution-ews/libevolution-ews.so", G_MODULE_BIND_LAZY);
-    ews_priv = g_module_open ("/usr/lib/evolution-ews/libcamelews-priv.so", G_MODULE_BIND_LAZY);
-    ews_module = g_module_open ("/usr/lib/evolution/modules/module-ews-configuration.so", G_MODULE_BIND_LAZY);
+    ews_lib = load_module_with_fallback (EVOLUTION_EWS_LIBDIR, EVOLUTION_PRIVLIBDIR "-ews", "libevolution-ews.so");
+    ews_priv = load_module_with_fallback (EVOLUTION_EWS_LIBDIR, EVOLUTION_PRIVLIBDIR "-ews", "libcamelews-priv.so");
+    ews_module = load_module_with_fallback (EVOLUTION_MODULEDIR, EVOLUTION_PRIVLIBDIR "/modules", "module-ews-configuration.so");
 
     if (!ews_lib || !ews_priv || !ews_module) {
-        g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "Could not load EWS libraries");
+        g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_FAILED, "Could not load Evolution EWS libraries");
         goto cleanup;
     }
 
@@ -411,24 +469,27 @@ m365_calendar_subscribe (ESource *ews_source, const gchar *email, GError **error
     if (!get_conn || !fid_new || !get_info || !get_perms || !perms_free || !subscribe_sync ||
         !set_mailbox || !get_mailbox || !get_folder_type || !folder_set_id || !folder_set_name ||
         !folder_set_folder_type || !folder_set_foreign_mail || !folder_set_foreign) {
-        g_set_error (error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED, "Required EWS symbols not found");
+        g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED, "Required EWS symbols not found");
         goto cleanup;
     }
 
     conn = get_conn (service);
     if (!conn) {
-        g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "Could not get EWS connection for store");
+        g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_FAILED, "Could not get EWS connection for store");
         goto cleanup;
     }
 
+#if defined(FREEBUSY_ONLY_DEFAULT) && FREEBUSY_ONLY_DEFAULT
+    gboolean is_fallback = TRUE;
+#else
     old_mailbox = g_strdup (get_mailbox (conn));
     set_mailbox (conn, email);
 
     gboolean is_fallback = FALSE;
     fid = fid_new ("calendar", NULL, TRUE);
 
-    if (!get_info (conn, G_PRIORITY_DEFAULT, email, fid, &folder, NULL, error)) {
-        gchar *msg = (error && *error) ? (*error)->message : "";
+    if (!get_info (conn, G_PRIORITY_DEFAULT, email, fid, &folder, cancellable, error)) {
+        const gchar *msg = (error && *error) ? (*error)->message : "";
         if (strstr (msg, "403") || strstr (msg, "Access Denied") ||
             strstr (msg, "Forbidden") || strstr (msg, "not found")) {
             if (error)
@@ -443,8 +504,8 @@ m365_calendar_subscribe (ESource *ews_source, const gchar *email, GError **error
         GSList *perms = NULL;
         GError *perm_error = NULL;
 
-        if (!get_perms (conn, G_PRIORITY_DEFAULT, fid, &perms, NULL, &perm_error)) {
-            gchar *msg = perm_error ? perm_error->message : "";
+        if (!get_perms (conn, G_PRIORITY_DEFAULT, fid, &perms, cancellable, &perm_error)) {
+            const gchar *msg = perm_error ? perm_error->message : "";
             if (strstr (msg, "403") || strstr (msg, "Access Denied") ||
                 strstr (msg, "Forbidden") || strstr (msg, "not found")) {
                 g_clear_error (&perm_error);
@@ -474,9 +535,10 @@ m365_calendar_subscribe (ESource *ews_source, const gchar *email, GError **error
     fid = NULL;
 
     set_mailbox (conn, old_mailbox);
+#endif
 
     if (is_fallback) {
-        gchar *tmp = g_strconcat ("freebusy-calendar", "::", email, NULL);
+        g_autofree gchar *tmp = g_strconcat ("freebusy-calendar", "::", email, NULL);
         folder = g_object_new (get_folder_type (), NULL);
         fid = fid_new (tmp, NULL, FALSE);
         folder_set_id (folder, fid);
@@ -484,22 +546,21 @@ m365_calendar_subscribe (ESource *ews_source, const gchar *email, GError **error
         folder_set_folder_type (folder, EWS_FOLDER_TYPE_CALENDAR);
         folder_set_foreign_mail (folder, email);
         folder_set_foreign (folder, TRUE);
-        g_free (tmp);
 
-        success = subscribe_sync (service, folder, NULL, email, "Availability", FALSE, NULL, error);
+        success = subscribe_sync (service, folder, NULL, email, "Availability", FALSE, cancellable, error);
     } else {
         folder_set_foreign (folder, TRUE);
         folder_set_foreign_mail (folder, email);
-        success = subscribe_sync (service, folder, NULL, email, "Calendar", FALSE, NULL, error);
+        success = subscribe_sync (service, folder, NULL, email, "Calendar", FALSE, cancellable, error);
 
         if (!success && error && *error) {
-            gchar *msg = (*error)->message;
+            const gchar *msg = (*error)->message;
             if (strstr (msg, "403") || strstr (msg, "Access Denied") ||
                 strstr (msg, "Forbidden") || strstr (msg, "not found")) {
                 g_clear_error (error);
                 g_clear_object (&folder);
 
-                gchar *tmp = g_strconcat ("freebusy-calendar", "::", email, NULL);
+                g_autofree gchar *tmp = g_strconcat ("freebusy-calendar", "::", email, NULL);
                 folder = g_object_new (get_folder_type (), NULL);
                 fid = fid_new (tmp, NULL, FALSE);
                 folder_set_id (folder, fid);
@@ -507,9 +568,8 @@ m365_calendar_subscribe (ESource *ews_source, const gchar *email, GError **error
                 folder_set_folder_type (folder, EWS_FOLDER_TYPE_CALENDAR);
                 folder_set_foreign_mail (folder, email);
                 folder_set_foreign (folder, TRUE);
-                g_free (tmp);
 
-                success = subscribe_sync (service, folder, NULL, email, "Availability", FALSE, NULL, error);
+                success = subscribe_sync (service, folder, NULL, email, "Availability", FALSE, cancellable, error);
             }
         }
     }
@@ -532,4 +592,60 @@ cleanup:
         g_module_close (ews_module);
 
     return success;
+}
+
+static void
+m365_calendar_subscribe_thread (GTask *task,
+                                gpointer source_object,
+                                gpointer task_data,
+                                GCancellable *cancellable)
+{
+    ESource *ews_source = E_SOURCE (source_object);
+    SubscribeTaskData *data = (SubscribeTaskData *) task_data;
+    GError *error = NULL;
+
+    if (g_task_return_error_if_cancelled (task))
+        return;
+
+    gboolean success = m365_calendar_subscribe_internal (ews_source, data->email, cancellable, &error);
+    if (success)
+        g_task_return_boolean (task, TRUE);
+    else
+        g_task_return_error (task, error);
+}
+
+void
+m365_calendar_subscribe_async (ESource *ews_source,
+                               const gchar *email,
+                               GCancellable *cancellable,
+                               GAsyncReadyCallback callback,
+                               gpointer user_data)
+{
+    g_return_if_fail (E_IS_SOURCE (ews_source));
+    g_return_if_fail (email != NULL);
+
+    GTask *task = g_task_new (ews_source, cancellable, callback, user_data);
+    g_task_set_source_tag (task, m365_calendar_subscribe_async);
+
+    SubscribeTaskData *data = g_new0 (SubscribeTaskData, 1);
+    data->email = g_strdup (email);
+    g_task_set_task_data (task, data, (GDestroyNotify) subscribe_task_data_free);
+
+    g_task_run_in_thread (task, m365_calendar_subscribe_thread);
+    g_object_unref (task);
+}
+
+gboolean
+m365_calendar_subscribe_finish (ESource *ews_source,
+                                GAsyncResult *result,
+                                GError **error)
+{
+    g_return_val_if_fail (g_task_is_valid (result, ews_source), FALSE);
+    return g_task_propagate_boolean (G_TASK (result), error);
+}
+
+gboolean
+m365_calendar_subscribe (ESource *ews_source, const gchar *email, GError **error)
+{
+    return m365_calendar_subscribe_internal (ews_source, email, NULL, error);
 }

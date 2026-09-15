@@ -6,19 +6,39 @@
 
 #include <glib/gi18n.h>
 
+typedef struct {
+    GtkWidget *dialog;
+    GtkWidget *search_entry;
+    GtkWidget *spinner;
+    GtkWidget *subscribe_button;
+    guint debounce_id;
+} DialogState;
+
+static void
+dialog_state_free (gpointer data)
+{
+    DialogState *state = (DialogState *) data;
+    if (!state)
+        return;
+
+    if (state->debounce_id > 0) {
+        g_source_remove (state->debounce_id);
+        state->debounce_id = 0;
+    }
+    g_free (state);
+}
+
 static gboolean
 contact_filter_func (GtkEntryCompletion *completion, const gchar *key, GtkTreeIter *iter, gpointer user_data)
 {
     GtkTreeModel *model = gtk_entry_completion_get_model (completion);
-    gchar *full_string = NULL;
+    g_autofree gchar *full_string = NULL;
     gboolean match = FALSE;
 
     gtk_tree_model_get (model, iter, 0, &full_string, -1);
 
-    if (full_string) {
+    if (full_string)
         match = calendar_fuzzy_match (key, full_string);
-        g_free (full_string);
-    }
 
     return match;
 }
@@ -36,29 +56,33 @@ calendar_search_key_press_cb (GtkWidget *widget, GdkEventKey *event, gpointer us
 static void
 calendar_search_results_cb (const GSList *contacts, gpointer user_data)
 {
-    GtkWidget *dialog = user_data;
+    GtkWidget *dialog = GTK_WIDGET (user_data);
+    if (!GTK_IS_WIDGET (dialog))
+        return;
+
     GtkWidget *search_entry = g_object_get_data (G_OBJECT (dialog), "search-entry");
+    if (!search_entry)
+        return;
+
     GtkEntryCompletion *completion = gtk_entry_get_completion (GTK_ENTRY (search_entry));
+    if (!completion)
+        return;
+
     GtkListStore *store = GTK_LIST_STORE (gtk_entry_completion_get_model (completion));
-    const GSList *l;
-
-    g_debug ("M365 Calendar Subscribe: Received %u contacts for pre-load", g_slist_length ((GSList *)contacts));
-
     gtk_list_store_clear (store);
 
-    for (l = contacts; l; l = l->next) {
+    for (const GSList *l = contacts; l; l = l->next) {
         CalendarContact *contact = l->data;
         GtkTreeIter iter;
-        gchar *full_string = g_strdup_printf ("%s, %s",
-                                              contact->display_name ? contact->display_name : "",
-                                              contact->email ? contact->email : "");
+        g_autofree gchar *full_string = g_strdup_printf ("%s, %s",
+                                                          contact->display_name ? contact->display_name : "",
+                                                          contact->email ? contact->email : "");
 
         gtk_list_store_append (store, &iter);
         gtk_list_store_set (store, &iter,
                             0, full_string,
                             1, contact->email,
                             -1);
-        g_free (full_string);
     }
 
     g_object_set_data (G_OBJECT (dialog), "contacts-loaded", GINT_TO_POINTER (1));
@@ -69,23 +93,69 @@ calendar_search_results_cb (const GSList *contacts, gpointer user_data)
 }
 
 static gboolean
+on_search_debounced (gpointer user_data)
+{
+    DialogState *state = (DialogState *) user_data;
+    state->debounce_id = 0;
+
+    const gchar *text = gtk_entry_get_text (GTK_ENTRY (state->search_entry));
+    if (text && strlen (text) >= 2) {
+        m365_calendar_search_contacts (text, calendar_search_results_cb, state->dialog);
+    }
+
+    return G_SOURCE_REMOVE;
+}
+
+static void
+on_search_entry_changed (GtkEditable *editable, gpointer user_data)
+{
+    DialogState *state = (DialogState *) user_data;
+
+    if (state->debounce_id > 0)
+        g_source_remove (state->debounce_id);
+
+    state->debounce_id = g_timeout_add (300, on_search_debounced, state);
+}
+
+static gboolean
 calendar_search_match_selected_cb (GtkEntryCompletion *completion, GtkTreeModel *model, GtkTreeIter *iter, gpointer user_data)
 {
-    GtkWidget *dialog = user_data;
+    GtkWidget *dialog = GTK_WIDGET (user_data);
     GtkWidget *search_entry = g_object_get_data (G_OBJECT (dialog), "search-entry");
-    gchar *full_string = NULL;
-    gchar *email = NULL;
+    g_autofree gchar *full_string = NULL;
+    g_autofree gchar *email = NULL;
 
     gtk_tree_model_get (model, iter, 0, &full_string, 1, &email, -1);
 
-    if (full_string) {
+    if (full_string && search_entry)
         gtk_entry_set_text (GTK_ENTRY (search_entry), full_string);
-        g_free (full_string);
-    }
 
-    g_object_set_data_full (G_OBJECT (dialog), "selected-email", email, g_free);
+    g_object_set_data_full (G_OBJECT (dialog), "selected-email", g_strdup (email), g_free);
 
     return TRUE;
+}
+
+void
+calendar_dialog_set_busy (GtkWidget *dialog, gboolean busy)
+{
+    if (!dialog || !GTK_IS_DIALOG (dialog))
+        return;
+
+    DialogState *state = g_object_get_data (G_OBJECT (dialog), "dialog-state");
+    if (!state)
+        return;
+
+    gtk_widget_set_sensitive (state->search_entry, !busy);
+    if (state->subscribe_button)
+        gtk_widget_set_sensitive (state->subscribe_button, !busy);
+
+    if (busy) {
+        gtk_widget_show (state->spinner);
+        gtk_spinner_start (GTK_SPINNER (state->spinner));
+    } else {
+        gtk_spinner_stop (GTK_SPINNER (state->spinner));
+        gtk_widget_hide (state->spinner);
+    }
 }
 
 GtkWidget *
@@ -117,7 +187,21 @@ calendar_create_quick_subscribe_dialog (GtkWindow *parent)
     gtk_widget_set_size_request (search_entry, 400, -1);
     gtk_grid_attach (GTK_GRID (grid), search_entry, 1, 0, 1, 1);
 
+    GtkWidget *spinner = gtk_spinner_new ();
+    gtk_widget_set_no_show_all (spinner, TRUE);
+    gtk_grid_attach (GTK_GRID (grid), spinner, 2, 0, 1, 1);
+
+    GtkWidget *subscribe_button = gtk_dialog_get_widget_for_response (GTK_DIALOG (dialog), GTK_RESPONSE_ACCEPT);
+
+    DialogState *state = g_new0 (DialogState, 1);
+    state->dialog = dialog;
+    state->search_entry = search_entry;
+    state->spinner = spinner;
+    state->subscribe_button = subscribe_button;
+    g_object_set_data_full (G_OBJECT (dialog), "dialog-state", state, dialog_state_free);
+
     g_signal_connect (search_entry, "key-press-event", G_CALLBACK (calendar_search_key_press_cb), dialog);
+    g_signal_connect (search_entry, "changed", G_CALLBACK (on_search_entry_changed), state);
 
     GtkEntryCompletion *completion = gtk_entry_completion_new ();
     GtkListStore *store = gtk_list_store_new (2, G_TYPE_STRING, G_TYPE_STRING);
@@ -138,8 +222,6 @@ calendar_create_quick_subscribe_dialog (GtkWindow *parent)
     gtk_widget_show_all (grid);
 
     g_object_set_data (G_OBJECT (dialog), "search-entry", search_entry);
-
-    m365_calendar_load_all_contacts (calendar_search_results_cb, dialog);
 
     return dialog;
 }

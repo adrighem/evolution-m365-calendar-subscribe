@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include <glib.h>
+#include <gio/gio.h>
 #include <libebook/libebook.h>
 
 #include "../src/calendar-manager.h"
@@ -30,6 +31,21 @@ test_subscribe_calendar_null_source (void)
 
     g_test_expect_message (G_LOG_DOMAIN, G_LOG_LEVEL_CRITICAL, "*E_IS_SOURCE*");
     g_assert_false (m365_calendar_subscribe (NULL, "test@example.com", &error));
+    g_test_assert_expected_messages ();
+}
+
+static void
+async_subscribe_cb (GObject *source, GAsyncResult *res, gpointer user_data)
+{
+    GMainLoop *loop = (GMainLoop *) user_data;
+    g_main_loop_quit (loop);
+}
+
+static void
+test_subscribe_calendar_async_null_source (void)
+{
+    g_test_expect_message (G_LOG_DOMAIN, G_LOG_LEVEL_CRITICAL, "*E_IS_SOURCE*");
+    m365_calendar_subscribe_async (NULL, "test@example.com", NULL, async_subscribe_cb, NULL);
     g_test_assert_expected_messages ();
 }
 
@@ -106,6 +122,7 @@ main (int argc, char *argv[])
 
     g_test_add_func ("/utils/fuzzy-match", test_fuzzy_match);
     g_test_add_func ("/manager/subscribe-calendar-null-source", test_subscribe_calendar_null_source);
+    g_test_add_func ("/manager/subscribe-calendar-async-null-source", test_subscribe_calendar_async_null_source);
     g_test_add_func ("/manager/ews-contact-filter", test_ews_contact_filter_logic);
     g_test_add_func ("/manager/contact-loading-no-shell", test_contact_loading_no_shell);
 

@@ -28,9 +28,15 @@ pkg_check_modules(EVOLUTION REQUIRED IMPORTED_TARGET
     gtk+-3.0
 )
 
+pkg_get_variable(EVO_LIBDIR evolution-shell-3.0 libdir)
 pkg_get_variable(EVO_PRIVLIBDIR evolution-shell-3.0 privlibdir)
+pkg_get_variable(EVO_MODULEDIR evolution-shell-3.0 moduledir)
 
 set(EVOLUTION_PLUGIN_DIR "${EVO_PRIVLIBDIR}/plugins" CACHE PATH "Path to Evolution plugins directory")
+set(EVOLUTION_EWS_LIBDIR "${EVO_LIBDIR}/evolution-ews" CACHE PATH "Path to Evolution EWS private libraries")
+set(EVOLUTION_MODULEDIR "${EVO_MODULEDIR}" CACHE PATH "Path to Evolution modules directory")
+
+option(FREEBUSY_ONLY "Only attempt free/busy availability calendars and bypass standard calendars" ON)
 
 enable_testing()
 
