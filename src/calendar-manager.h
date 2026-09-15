@@ -22,7 +22,8 @@ void m365_calendar_search_contacts (const gchar *search_text,
                                     CalendarContactCallback callback,
                                     gpointer user_data);
 
-void m365_calendar_load_all_contacts (CalendarContactCallback callback,
+void m365_calendar_load_all_contacts (GCancellable *cancellable,
+                                      CalendarContactCallback callback,
                                       gpointer user_data);
 
 ESource * m365_calendar_get_ews_source (void);

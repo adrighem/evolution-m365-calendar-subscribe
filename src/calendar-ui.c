@@ -61,9 +61,10 @@ calendar_search_key_press_cb (GtkWidget *widget, GdkEventKey *event, gpointer us
 static void
 calendar_search_results_cb (const GSList *contacts, gpointer user_data)
 {
-    GtkWidget *dialog = GTK_WIDGET (user_data);
-    if (!GTK_IS_WIDGET (dialog))
+    if (!user_data || !GTK_IS_WIDGET (user_data))
         return;
+
+    GtkWidget *dialog = GTK_WIDGET (user_data);
 
     GtkWidget *search_entry = g_object_get_data (G_OBJECT (dialog), "search-entry");
     if (!search_entry)
@@ -121,6 +122,9 @@ static void
 on_search_entry_changed (GtkEditable *editable, gpointer user_data)
 {
     DialogState *state = (DialogState *) user_data;
+
+    if (state->dialog)
+        g_object_set_data (G_OBJECT (state->dialog), "selected-email", NULL);
 
     if (state->debounce_id > 0)
         g_source_remove (state->debounce_id);

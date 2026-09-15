@@ -133,7 +133,8 @@ calendar_search_got_contacts_cb (GObject *source_object, GAsyncResult *res, gpoi
 
         g_slist_free_full (contacts, g_object_unref);
     } else {
-        g_warning ("M365 Calendar Subscribe: Failed to get contacts: %s", error ? error->message : "Unknown error");
+        if (!g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+            g_warning ("M365 Calendar Subscribe: Failed to get contacts: %s", error ? error->message : "Unknown error");
     }
 
     ctx->pending_books--;
@@ -171,7 +172,8 @@ calendar_search_connected_cb (GObject *source_object, GAsyncResult *res, gpointe
         e_book_query_unref (query);
         g_object_unref (book_client);
     } else {
-        g_warning ("M365 Calendar Subscribe: Failed to connect to book: %s", error ? error->message : "Unknown error");
+        if (!g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+            g_warning ("M365 Calendar Subscribe: Failed to connect to book: %s", error ? error->message : "Unknown error");
 
         ctx->pending_books--;
         if (ctx->pending_books <= 0) {
@@ -189,15 +191,26 @@ calendar_load_all_connected_cb (GObject *source_object, GAsyncResult *res, gpoin
     g_autoptr(GError) error = NULL;
     EBookClient *book_client = (EBookClient *) e_book_client_connect_finish (res, &error);
 
+    if (ctx->cancellable && g_cancellable_is_cancelled (ctx->cancellable)) {
+        if (book_client)
+            g_object_unref (book_client);
+        ctx->pending_books--;
+        if (ctx->pending_books <= 0)
+            calendar_search_context_free (ctx);
+        return;
+    }
+
     if (book_client) {
-        e_book_client_get_contacts (book_client, "(contains \"x-evolution-any-field\" \"\")", NULL, calendar_search_got_contacts_cb, ctx);
+        e_book_client_get_contacts (book_client, "(contains \"x-evolution-any-field\" \"\")", ctx->cancellable, calendar_search_got_contacts_cb, ctx);
         g_object_unref (book_client);
     } else {
-        g_warning ("M365 Calendar Subscribe: Failed to connect to book for bulk load: %s", error ? error->message : "Unknown error");
+        if (!g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+            g_warning ("M365 Calendar Subscribe: Failed to connect to book for bulk load: %s", error ? error->message : "Unknown error");
 
         ctx->pending_books--;
         if (ctx->pending_books <= 0) {
-            ctx->callback (ctx->contacts, ctx->user_data);
+            if (!ctx->cancellable || !g_cancellable_is_cancelled (ctx->cancellable))
+                ctx->callback (ctx->contacts, ctx->user_data);
             calendar_search_context_free (ctx);
         }
     }
@@ -259,7 +272,7 @@ m365_calendar_search_contacts (const gchar *search_text,
 }
 
 void
-m365_calendar_load_all_contacts (CalendarContactCallback callback, gpointer user_data)
+m365_calendar_load_all_contacts (GCancellable *cancellable, CalendarContactCallback callback, gpointer user_data)
 {
     GList *filtered_sources = calendar_list_ews_or_m365_address_books ();
 
@@ -270,13 +283,15 @@ m365_calendar_load_all_contacts (CalendarContactCallback callback, gpointer user
     }
 
     CalendarSearchContext *ctx = g_new0 (CalendarSearchContext, 1);
+    if (cancellable)
+        ctx->cancellable = g_object_ref (cancellable);
     ctx->callback = callback;
     ctx->user_data = user_data;
     ctx->pending_books = g_list_length (filtered_sources);
 
     for (GList *l = filtered_sources; l; l = l->next) {
         ESource *source = E_SOURCE (l->data);
-        e_book_client_connect (source, 30, NULL, calendar_load_all_connected_cb, ctx);
+        e_book_client_connect (source, 30, cancellable, calendar_load_all_connected_cb, ctx);
     }
 
     g_list_free_full (filtered_sources, g_object_unref);
@@ -381,7 +396,6 @@ typedef void (*EwsFolderIdFreeFunc) (gpointer fid);
 typedef gboolean (*EwsGetFolderInfoFunc) (gpointer cnc, gint pri, const gchar *mail_id, gpointer fid, gpointer *out_folder, GCancellable *cancellable, GError **error);
 typedef gboolean (*EwsGetFolderPermissionsFunc) (gpointer cnc, gint pri, gpointer fid, GSList **out_permissions, GCancellable *cancellable, GError **error);
 typedef void (*EwsPermissionsFreeFunc) (GSList *permissions);
-typedef void (*EwsSetMailboxFunc) (gpointer cnc, const gchar *mailbox);
 typedef const gchar * (*EwsGetMailboxFunc) (gpointer cnc);
 
 typedef GType (*EwsFolderGetTypeFunc) (void);
@@ -400,6 +414,70 @@ typedef gboolean (*EwsSubscribeSyncFunc) (gpointer ews_store,
                                           GCancellable *cancellable,
                                           GError **error);
 
+typedef struct {
+    CamelEwsStoreGetConnFunc get_conn;
+    EwsFolderIdNewFunc fid_new;
+    EwsFolderIdFreeFunc fid_free;
+    EwsGetFolderInfoFunc get_info;
+    EwsGetFolderPermissionsFunc get_perms;
+    EwsPermissionsFreeFunc perms_free;
+    EwsGetMailboxFunc get_mailbox;
+    EwsFolderGetTypeFunc get_folder_type;
+    EwsFolderSetIdFunc folder_set_id;
+    EwsFolderSetNameFunc folder_set_name;
+    EwsFolderSetFolderTypeFunc folder_set_folder_type;
+    EwsFolderSetForeignMailFunc folder_set_foreign_mail;
+    EwsFolderSetForeignFunc folder_set_foreign;
+    EwsSubscribeSyncFunc subscribe_sync;
+    gboolean loaded;
+} EwsSymbols;
+
+static EwsSymbols global_ews_syms;
+static gsize ews_symbols_init_state = 0;
+
+static gboolean
+ensure_ews_symbols (GError **error)
+{
+    if (g_once_init_enter (&ews_symbols_init_state)) {
+        GModule *ews_lib = load_module_with_fallback (EVOLUTION_EWS_LIBDIR, EVOLUTION_PRIVLIBDIR "-ews", "libevolution-ews.so");
+        GModule *ews_priv = load_module_with_fallback (EVOLUTION_EWS_LIBDIR, EVOLUTION_PRIVLIBDIR "-ews", "libcamelews-priv.so");
+        GModule *ews_module = load_module_with_fallback (EVOLUTION_MODULEDIR, EVOLUTION_PRIVLIBDIR "/modules", "module-ews-configuration.so");
+
+        if (ews_lib && ews_priv && ews_module) {
+            g_module_symbol (ews_priv, "camel_ews_store_ref_connection", (gpointer *) &global_ews_syms.get_conn);
+            g_module_symbol (ews_lib, "e_ews_folder_id_new", (gpointer *) &global_ews_syms.fid_new);
+            g_module_symbol (ews_lib, "e_ews_folder_id_free", (gpointer *) &global_ews_syms.fid_free);
+            g_module_symbol (ews_lib, "e_ews_connection_get_folder_info_sync", (gpointer *) &global_ews_syms.get_info);
+            g_module_symbol (ews_lib, "e_ews_connection_get_folder_permissions_sync", (gpointer *) &global_ews_syms.get_perms);
+            g_module_symbol (ews_lib, "e_ews_permissions_free", (gpointer *) &global_ews_syms.perms_free);
+            g_module_symbol (ews_lib, "e_ews_connection_get_mailbox", (gpointer *) &global_ews_syms.get_mailbox);
+            g_module_symbol (ews_lib, "e_ews_folder_get_type", (gpointer *) &global_ews_syms.get_folder_type);
+            g_module_symbol (ews_lib, "e_ews_folder_set_id", (gpointer *) &global_ews_syms.folder_set_id);
+            g_module_symbol (ews_lib, "e_ews_folder_set_name", (gpointer *) &global_ews_syms.folder_set_name);
+            g_module_symbol (ews_lib, "e_ews_folder_set_folder_type", (gpointer *) &global_ews_syms.folder_set_folder_type);
+            g_module_symbol (ews_lib, "e_ews_folder_set_foreign_mail", (gpointer *) &global_ews_syms.folder_set_foreign_mail);
+            g_module_symbol (ews_lib, "e_ews_folder_set_foreign", (gpointer *) &global_ews_syms.folder_set_foreign);
+            g_module_symbol (ews_module, "e_ews_subscrive_foreign_folder_subscribe_sync", (gpointer *) &global_ews_syms.subscribe_sync);
+
+            if (global_ews_syms.get_conn && global_ews_syms.fid_new && global_ews_syms.fid_free &&
+                global_ews_syms.get_info && global_ews_syms.get_perms && global_ews_syms.perms_free &&
+                global_ews_syms.subscribe_sync && global_ews_syms.get_mailbox &&
+                global_ews_syms.get_folder_type && global_ews_syms.folder_set_id &&
+                global_ews_syms.folder_set_name && global_ews_syms.folder_set_folder_type &&
+                global_ews_syms.folder_set_foreign_mail && global_ews_syms.folder_set_foreign) {
+                global_ews_syms.loaded = TRUE;
+            }
+        }
+        g_once_init_leave (&ews_symbols_init_state, 1);
+    }
+
+    if (!global_ews_syms.loaded) {
+        g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED, "Could not load or resolve Evolution EWS libraries/symbols");
+        return FALSE;
+    }
+    return TRUE;
+}
+
 static gboolean
 m365_calendar_subscribe_internal (ESource *ews_source,
                                   const gchar *email,
@@ -410,28 +488,9 @@ m365_calendar_subscribe_internal (ESource *ews_source,
     EShellBackend *mail_backend;
     EMailSession *session;
     CamelService *service = NULL;
-    GModule *ews_module = NULL;
-    GModule *ews_lib = NULL;
-    GModule *ews_priv = NULL;
-    CamelEwsStoreGetConnFunc get_conn;
-    EwsFolderIdNewFunc fid_new;
-    EwsFolderIdFreeFunc fid_free;
-    EwsGetFolderInfoFunc get_info;
-    EwsGetFolderPermissionsFunc get_perms;
-    EwsPermissionsFreeFunc perms_free;
-    EwsSetMailboxFunc set_mailbox;
-    EwsGetMailboxFunc get_mailbox;
-    EwsFolderGetTypeFunc get_folder_type;
-    EwsFolderSetIdFunc folder_set_id;
-    EwsFolderSetNameFunc folder_set_name;
-    EwsFolderSetFolderTypeFunc folder_set_folder_type;
-    EwsFolderSetForeignMailFunc folder_set_foreign_mail;
-    EwsFolderSetForeignFunc folder_set_foreign;
-    EwsSubscribeSyncFunc subscribe_sync;
     gpointer conn = NULL;
     gpointer fid = NULL;
     gpointer folder = NULL;
-    gchar *old_mailbox = NULL;
     gboolean success = FALSE;
 
     g_return_val_if_fail (E_IS_SOURCE (ews_source), FALSE);
@@ -463,39 +522,10 @@ m365_calendar_subscribe_internal (ESource *ews_source,
         return FALSE;
     }
 
-    ews_lib = load_module_with_fallback (EVOLUTION_EWS_LIBDIR, EVOLUTION_PRIVLIBDIR "-ews", "libevolution-ews.so");
-    ews_priv = load_module_with_fallback (EVOLUTION_EWS_LIBDIR, EVOLUTION_PRIVLIBDIR "-ews", "libcamelews-priv.so");
-    ews_module = load_module_with_fallback (EVOLUTION_MODULEDIR, EVOLUTION_PRIVLIBDIR "/modules", "module-ews-configuration.so");
-
-    if (!ews_lib || !ews_priv || !ews_module) {
-        g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_FAILED, "Could not load Evolution EWS libraries");
+    if (!ensure_ews_symbols (error))
         goto cleanup;
-    }
 
-    g_module_symbol (ews_priv, "camel_ews_store_ref_connection", (gpointer *) &get_conn);
-    g_module_symbol (ews_lib, "e_ews_folder_id_new", (gpointer *) &fid_new);
-    g_module_symbol (ews_lib, "e_ews_folder_id_free", (gpointer *) &fid_free);
-    g_module_symbol (ews_lib, "e_ews_connection_get_folder_info_sync", (gpointer *) &get_info);
-    g_module_symbol (ews_lib, "e_ews_connection_get_folder_permissions_sync", (gpointer *) &get_perms);
-    g_module_symbol (ews_lib, "e_ews_permissions_free", (gpointer *) &perms_free);
-    g_module_symbol (ews_lib, "e_ews_connection_set_mailbox", (gpointer *) &set_mailbox);
-    g_module_symbol (ews_lib, "e_ews_connection_get_mailbox", (gpointer *) &get_mailbox);
-    g_module_symbol (ews_lib, "e_ews_folder_get_type", (gpointer *) &get_folder_type);
-    g_module_symbol (ews_lib, "e_ews_folder_set_id", (gpointer *) &folder_set_id);
-    g_module_symbol (ews_lib, "e_ews_folder_set_name", (gpointer *) &folder_set_name);
-    g_module_symbol (ews_lib, "e_ews_folder_set_folder_type", (gpointer *) &folder_set_folder_type);
-    g_module_symbol (ews_lib, "e_ews_folder_set_foreign_mail", (gpointer *) &folder_set_foreign_mail);
-    g_module_symbol (ews_lib, "e_ews_folder_set_foreign", (gpointer *) &folder_set_foreign);
-    g_module_symbol (ews_module, "e_ews_subscrive_foreign_folder_subscribe_sync", (gpointer *) &subscribe_sync);
-
-    if (!get_conn || !fid_new || !get_info || !get_perms || !perms_free || !subscribe_sync ||
-        !set_mailbox || !get_mailbox || !get_folder_type || !folder_set_id || !folder_set_name ||
-        !folder_set_folder_type || !folder_set_foreign_mail || !folder_set_foreign) {
-        g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED, "Required EWS symbols not found");
-        goto cleanup;
-    }
-
-    conn = get_conn (service);
+    conn = global_ews_syms.get_conn (service);
     if (!conn) {
         g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_FAILED, "Could not get EWS connection for store");
         goto cleanup;
@@ -504,13 +534,11 @@ m365_calendar_subscribe_internal (ESource *ews_source,
 #if defined(FREEBUSY_ONLY_DEFAULT) && FREEBUSY_ONLY_DEFAULT
     gboolean is_fallback = TRUE;
 #else
-    old_mailbox = g_strdup (get_mailbox (conn));
-    set_mailbox (conn, email);
-
+    const gchar *my_mailbox = global_ews_syms.get_mailbox (conn);
     gboolean is_fallback = FALSE;
-    fid = fid_new ("calendar", NULL, TRUE);
+    fid = global_ews_syms.fid_new ("calendar", NULL, TRUE);
 
-    if (!get_info (conn, G_PRIORITY_DEFAULT, email, fid, &folder, cancellable, error)) {
+    if (!global_ews_syms.get_info (conn, G_PRIORITY_DEFAULT, email, fid, &folder, cancellable, error)) {
         const gchar *msg = (error && *error) ? (*error)->message : "";
         if (strstr (msg, "403") || strstr (msg, "Access Denied") ||
             strstr (msg, "Forbidden") || strstr (msg, "not found")) {
@@ -518,15 +546,15 @@ m365_calendar_subscribe_internal (ESource *ews_source,
                 g_clear_error (error);
             is_fallback = TRUE;
         } else {
-            if (fid_free)
-                fid_free (fid);
+            if (global_ews_syms.fid_free)
+                global_ews_syms.fid_free (fid);
             goto cleanup;
         }
     } else {
         GSList *perms = NULL;
         GError *perm_error = NULL;
 
-        if (!get_perms (conn, G_PRIORITY_DEFAULT, fid, &perms, cancellable, &perm_error)) {
+        if (!global_ews_syms.get_perms (conn, G_PRIORITY_DEFAULT, fid, &perms, cancellable, &perm_error)) {
             const gchar *msg = perm_error ? perm_error->message : "";
             if (strstr (msg, "403") || strstr (msg, "Access Denied") ||
                 strstr (msg, "Forbidden") || strstr (msg, "not found")) {
@@ -538,42 +566,40 @@ m365_calendar_subscribe_internal (ESource *ews_source,
                     g_propagate_error (error, perm_error);
                 else
                     g_clear_error (&perm_error);
-                if (fid_free)
-                    fid_free (fid);
+                if (global_ews_syms.fid_free)
+                    global_ews_syms.fid_free (fid);
                 goto cleanup;
             }
         } else {
-            if (!ews_permissions_allow_read (perms, old_mailbox)) {
+            if (!ews_permissions_allow_read (perms, my_mailbox)) {
                 is_fallback = TRUE;
                 g_clear_object (&folder);
             }
-            if (perms_free)
-                perms_free (perms);
+            if (global_ews_syms.perms_free)
+                global_ews_syms.perms_free (perms);
         }
     }
 
-    if (fid_free)
-        fid_free (fid);
+    if (global_ews_syms.fid_free)
+        global_ews_syms.fid_free (fid);
     fid = NULL;
-
-    set_mailbox (conn, old_mailbox);
 #endif
 
     if (is_fallback) {
         g_autofree gchar *tmp = g_strconcat ("freebusy-calendar", "::", email, NULL);
-        folder = g_object_new (get_folder_type (), NULL);
-        fid = fid_new (tmp, NULL, FALSE);
-        folder_set_id (folder, fid);
-        folder_set_name (folder, _("Availability"));
-        folder_set_folder_type (folder, EWS_FOLDER_TYPE_CALENDAR);
-        folder_set_foreign_mail (folder, email);
-        folder_set_foreign (folder, TRUE);
+        folder = g_object_new (global_ews_syms.get_folder_type (), NULL);
+        fid = global_ews_syms.fid_new (tmp, NULL, FALSE);
+        global_ews_syms.folder_set_id (folder, fid);
+        global_ews_syms.folder_set_name (folder, _("Availability"));
+        global_ews_syms.folder_set_folder_type (folder, EWS_FOLDER_TYPE_CALENDAR);
+        global_ews_syms.folder_set_foreign_mail (folder, email);
+        global_ews_syms.folder_set_foreign (folder, TRUE);
 
-        success = subscribe_sync (service, folder, NULL, email, "Availability", FALSE, cancellable, error);
+        success = global_ews_syms.subscribe_sync (service, folder, NULL, email, "Availability", FALSE, cancellable, error);
     } else {
-        folder_set_foreign (folder, TRUE);
-        folder_set_foreign_mail (folder, email);
-        success = subscribe_sync (service, folder, NULL, email, "Calendar", FALSE, cancellable, error);
+        global_ews_syms.folder_set_foreign (folder, TRUE);
+        global_ews_syms.folder_set_foreign_mail (folder, email);
+        success = global_ews_syms.subscribe_sync (service, folder, NULL, email, "Calendar", FALSE, cancellable, error);
 
         if (!success && error && *error) {
             const gchar *msg = (*error)->message;
@@ -583,23 +609,20 @@ m365_calendar_subscribe_internal (ESource *ews_source,
                 g_clear_object (&folder);
 
                 g_autofree gchar *tmp = g_strconcat ("freebusy-calendar", "::", email, NULL);
-                folder = g_object_new (get_folder_type (), NULL);
-                fid = fid_new (tmp, NULL, FALSE);
-                folder_set_id (folder, fid);
-                folder_set_name (folder, _("Availability"));
-                folder_set_folder_type (folder, EWS_FOLDER_TYPE_CALENDAR);
-                folder_set_foreign_mail (folder, email);
-                folder_set_foreign (folder, TRUE);
+                folder = g_object_new (global_ews_syms.get_folder_type (), NULL);
+                fid = global_ews_syms.fid_new (tmp, NULL, FALSE);
+                global_ews_syms.folder_set_id (folder, fid);
+                global_ews_syms.folder_set_name (folder, _("Availability"));
+                global_ews_syms.folder_set_folder_type (folder, EWS_FOLDER_TYPE_CALENDAR);
+                global_ews_syms.folder_set_foreign_mail (folder, email);
+                global_ews_syms.folder_set_foreign (folder, TRUE);
 
-                success = subscribe_sync (service, folder, NULL, email, "Availability", FALSE, cancellable, error);
+                success = global_ews_syms.subscribe_sync (service, folder, NULL, email, "Availability", FALSE, cancellable, error);
             }
         }
     }
 
 cleanup:
-    if (conn && old_mailbox)
-        set_mailbox (conn, old_mailbox);
-    g_free (old_mailbox);
     if (conn)
         g_object_unref (conn);
     if (folder)
