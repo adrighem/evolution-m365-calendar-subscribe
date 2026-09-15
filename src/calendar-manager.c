@@ -86,6 +86,9 @@ load_module_with_fallback (const gchar *primary_dir, const gchar *secondary_dir,
         module = g_module_open (filename, G_MODULE_BIND_LAZY);
     }
 
+    if (module)
+        g_module_make_resident (module);
+
     return module;
 }
 
@@ -584,12 +587,6 @@ cleanup:
         g_object_unref (folder);
     if (service)
         g_object_unref (service);
-    if (ews_lib)
-        g_module_close (ews_lib);
-    if (ews_priv)
-        g_module_close (ews_priv);
-    if (ews_module)
-        g_module_close (ews_module);
 
     return success;
 }
