@@ -12,6 +12,7 @@ typedef struct {
     GtkWidget *spinner;
     GtkWidget *subscribe_button;
     guint debounce_id;
+    GCancellable *search_cancellable;
 } DialogState;
 
 static void
@@ -24,6 +25,10 @@ dialog_state_free (gpointer data)
     if (state->debounce_id > 0) {
         g_source_remove (state->debounce_id);
         state->debounce_id = 0;
+    }
+    if (state->search_cancellable) {
+        g_cancellable_cancel (state->search_cancellable);
+        g_clear_object (&state->search_cancellable);
     }
     g_free (state);
 }
@@ -98,9 +103,15 @@ on_search_debounced (gpointer user_data)
     DialogState *state = (DialogState *) user_data;
     state->debounce_id = 0;
 
+    if (state->search_cancellable) {
+        g_cancellable_cancel (state->search_cancellable);
+        g_clear_object (&state->search_cancellable);
+    }
+
     const gchar *text = gtk_entry_get_text (GTK_ENTRY (state->search_entry));
     if (text && strlen (text) >= 2) {
-        m365_calendar_search_contacts (text, calendar_search_results_cb, state->dialog);
+        state->search_cancellable = g_cancellable_new ();
+        m365_calendar_search_contacts (text, state->search_cancellable, calendar_search_results_cb, state->dialog);
     }
 
     return G_SOURCE_REMOVE;

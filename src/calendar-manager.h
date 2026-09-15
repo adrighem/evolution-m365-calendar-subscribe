@@ -18,6 +18,7 @@ typedef struct {
 typedef void (*CalendarContactCallback) (const GSList *contacts, gpointer user_data);
 
 void m365_calendar_search_contacts (const gchar *search_text,
+                                    GCancellable *cancellable,
                                     CalendarContactCallback callback,
                                     gpointer user_data);
 

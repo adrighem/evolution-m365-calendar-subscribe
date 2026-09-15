@@ -7,6 +7,7 @@
 #include <glib/gi18n.h>
 #include <gtk/gtk.h>
 #include <shell/e-shell-view.h>
+#include <shell/e-shell-window.h>
 
 typedef struct {
     GtkWindow *parent;
@@ -56,6 +57,9 @@ calendar_subscribe_async_handler (GtkWindow *parent, GtkWidget *dialog, const gc
     g_debug ("M365 Calendar Subscribe: Using EWS mail source '%s' (UID: %s) for async subscription",
              e_source_get_display_name (ews_source), e_source_get_uid (ews_source));
 
+    // Disconnect response callback so destruction on completion does not re-trigger response handler
+    g_signal_handlers_disconnect_by_data (dialog, parent);
+
     SubscribeContext *ctx = g_new0 (SubscribeContext, 1);
     ctx->parent = parent;
     ctx->dialog = dialog;
@@ -92,7 +96,8 @@ void
 action_calendar_quick_subscribe_cb (EUIAction *action, GVariant *parameter, gpointer user_data)
 {
     EShellView *shell_view = E_SHELL_VIEW (user_data);
-    GtkWindow *parent = GTK_WINDOW (gtk_widget_get_toplevel (GTK_WIDGET (shell_view)));
+    EShellWindow *shell_window = e_shell_view_get_shell_window (shell_view);
+    GtkWindow *parent = GTK_WINDOW (shell_window);
     GtkWidget *dialog = calendar_create_quick_subscribe_dialog (parent);
 
     g_signal_connect (dialog, "response", G_CALLBACK (on_quick_subscribe_dialog_response), parent);

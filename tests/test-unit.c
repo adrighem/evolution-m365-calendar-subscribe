@@ -110,7 +110,7 @@ test_contact_loading_no_shell (void)
 
     callback_called = FALSE;
     g_test_expect_message (G_LOG_DOMAIN, G_LOG_LEVEL_WARNING, "*No EWS or Microsoft 365 address books available*");
-    m365_calendar_search_contacts ("test", dummy_contacts_callback, &callback_called);
+    m365_calendar_search_contacts ("test", NULL, dummy_contacts_callback, &callback_called);
     g_assert_true (callback_called);
     g_test_assert_expected_messages ();
 }

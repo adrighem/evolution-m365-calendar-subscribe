@@ -27,6 +27,7 @@
 
 typedef struct {
     gchar *search_text;
+    GCancellable *cancellable;
     CalendarContactCallback callback;
     gpointer user_data;
     GSList *contacts;
@@ -55,6 +56,7 @@ calendar_search_context_free (CalendarSearchContext *ctx)
         return;
 
     g_free (ctx->search_text);
+    g_clear_object (&ctx->cancellable);
     g_slist_free_full (ctx->contacts, (GDestroyNotify) calendar_contact_free);
     g_free (ctx);
 }
@@ -136,8 +138,10 @@ calendar_search_got_contacts_cb (GObject *source_object, GAsyncResult *res, gpoi
 
     ctx->pending_books--;
     if (ctx->pending_books <= 0) {
-        ctx->contacts = g_slist_reverse (ctx->contacts);
-        ctx->callback (ctx->contacts, ctx->user_data);
+        if (!ctx->cancellable || !g_cancellable_is_cancelled (ctx->cancellable)) {
+            ctx->contacts = g_slist_reverse (ctx->contacts);
+            ctx->callback (ctx->contacts, ctx->user_data);
+        }
         calendar_search_context_free (ctx);
     }
 }
@@ -149,11 +153,20 @@ calendar_search_connected_cb (GObject *source_object, GAsyncResult *res, gpointe
     g_autoptr(GError) error = NULL;
     EBookClient *book_client = (EBookClient *) e_book_client_connect_finish (res, &error);
 
+    if (ctx->cancellable && g_cancellable_is_cancelled (ctx->cancellable)) {
+        if (book_client)
+            g_object_unref (book_client);
+        ctx->pending_books--;
+        if (ctx->pending_books <= 0)
+            calendar_search_context_free (ctx);
+        return;
+    }
+
     if (book_client) {
         EBookQuery *query = e_book_query_any_field_contains (ctx->search_text);
         g_autofree gchar *sexp = e_book_query_to_string (query);
 
-        e_book_client_get_contacts (book_client, sexp, NULL, calendar_search_got_contacts_cb, ctx);
+        e_book_client_get_contacts (book_client, sexp, ctx->cancellable, calendar_search_got_contacts_cb, ctx);
 
         e_book_query_unref (query);
         g_object_unref (book_client);
@@ -162,7 +175,8 @@ calendar_search_connected_cb (GObject *source_object, GAsyncResult *res, gpointe
 
         ctx->pending_books--;
         if (ctx->pending_books <= 0) {
-            ctx->callback (ctx->contacts, ctx->user_data);
+            if (!ctx->cancellable || !g_cancellable_is_cancelled (ctx->cancellable))
+                ctx->callback (ctx->contacts, ctx->user_data);
             calendar_search_context_free (ctx);
         }
     }
@@ -215,7 +229,10 @@ calendar_list_ews_or_m365_address_books (void)
 }
 
 void
-m365_calendar_search_contacts (const gchar *search_text, CalendarContactCallback callback, gpointer user_data)
+m365_calendar_search_contacts (const gchar *search_text,
+                               GCancellable *cancellable,
+                               CalendarContactCallback callback,
+                               gpointer user_data)
 {
     GList *filtered_sources = calendar_list_ews_or_m365_address_books ();
 
@@ -227,13 +244,15 @@ m365_calendar_search_contacts (const gchar *search_text, CalendarContactCallback
 
     CalendarSearchContext *ctx = g_new0 (CalendarSearchContext, 1);
     ctx->search_text = g_strdup (search_text);
+    if (cancellable)
+        ctx->cancellable = g_object_ref (cancellable);
     ctx->callback = callback;
     ctx->user_data = user_data;
     ctx->pending_books = g_list_length (filtered_sources);
 
     for (GList *l = filtered_sources; l; l = l->next) {
         ESource *source = E_SOURCE (l->data);
-        e_book_client_connect (source, 30, NULL, calendar_search_connected_cb, ctx);
+        e_book_client_connect (source, 30, cancellable, calendar_search_connected_cb, ctx);
     }
 
     g_list_free_full (filtered_sources, g_object_unref);
