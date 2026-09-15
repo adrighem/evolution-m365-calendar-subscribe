@@ -4,7 +4,8 @@
     ".": {
       "release-type": "simple",
       "version-file": "VERSION",
-      "initial-version": "0.1.0",
+      "initial-version": "1.0.0",
+      "include-commit-authors": true,
       "include-component-in-tag": false,
       "include-v-in-tag": true,
       "include-v-in-release-name": true,
