@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.1](https://github.com/adrighem/evolution-m365-calendar-subscribe/compare/v1.0.0...v1.0.1) (2026-09-15)
+
+
+### Bug Fixes
+
+* **core:** thread-safe EWS symbol resolution and safe async subscription lifecycle ([3584bac](https://github.com/adrighem/evolution-m365-calendar-subscribe/commit/3584bacd0f61958e5a43016a270b4986051dc79b))
+* **ui:** fix shell window parent retrieval and search cancellation ([2f0b04e](https://github.com/adrighem/evolution-m365-calendar-subscribe/commit/2f0b04e715003551ab13051b8a9681c18a3e76e8))
+
 ## 1.0.0 (2026-09-15)
 
 
