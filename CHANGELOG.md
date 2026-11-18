@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.2](https://github.com/adrighem/evolution-m365-calendar-subscribe/compare/v1.0.1...v1.0.2) (2026-11-18)
+
+
+### Continuous Integration
+
+* build on ubuntu-26.04 for Evolution 3.56 EUIAction API ([4e30656](https://github.com/adrighem/evolution-m365-calendar-subscribe/commit/4e3065688e36e9b6c5f85c9ede3331205b9bf6f0))
+* install libebook1.2-dev for libebook-1.2 pkg-config module ([0c6fb2d](https://github.com/adrighem/evolution-m365-calendar-subscribe/commit/0c6fb2d7c3568e737b0faaf3bcd8f224d7d4aa27))
+
 ## [1.0.1](https://github.com/adrighem/evolution-m365-calendar-subscribe/compare/v1.0.0...v1.0.1) (2026-09-15)
 
 
