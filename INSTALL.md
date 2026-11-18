@@ -2,7 +2,8 @@
 
 ## Build Dependencies
 
-On Debian/Ubuntu systems:
+On Debian/Ubuntu systems (Evolution 3.56 or newer is required, for example
+Ubuntu 26.04):
 
 ```bash
 sudo apt-get install cmake pkg-config evolution-dev evolution-common \
