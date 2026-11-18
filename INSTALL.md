@@ -6,7 +6,7 @@ On Debian/Ubuntu systems:
 
 ```bash
 sudo apt-get install cmake pkg-config evolution-dev evolution-common \
-    libglib2.0-dev libgtk-3-dev evolution-ews
+    libebook1.2-dev libglib2.0-dev libgtk-3-dev evolution-ews
 ```
 
 The plugin uses GNOME Evolution, Evolution Data Server, GTK 3, and the

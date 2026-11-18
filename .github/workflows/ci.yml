@@ -29,6 +29,7 @@ jobs:
             evolution-dev \
             evolution-ews \
             libglib2.0-dev \
+            libebook1.2-dev \
             libgtk-3-dev \
             pkg-config \
             xvfb
